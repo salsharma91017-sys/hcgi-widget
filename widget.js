@@ -24,6 +24,7 @@
 
   function getAvatarUrl(apiUrl, agentId, avatar) {
     if (!avatar) return null;
+    // PocketBase file URL format
     return apiUrl + '/api/files/agents/' + agentId + '/' + avatar;
   }
 
@@ -62,6 +63,7 @@
       var inputState = useState(''); var input = inputState[0]; var setInput = inputState[1];
       var loadingState = useState(false); var loading = loadingState[0]; var setLoading = loadingState[1];
       var convState = useState(null); var conversationId = convState[0]; var setConversationId = convState[1];
+      var avatarErrorState = useState(false); var avatarError = avatarErrorState[0]; var setAvatarError = avatarErrorState[1];
       var visitorIdState = useState(function() {
         var id = null;
         try { id = localStorage.getItem('hcgi_visitor_id'); } catch(e) {}
@@ -85,6 +87,8 @@
             });
             var data = await r.json();
             if (cancelled) return;
+            console.log('[WIDGET] Agent data:', data);
+            console.log('[WIDGET] Avatar field:', data.avatar);
             setAgent(data);
             if (data.welcome_message) setMessages([{ role: 'assistant', content: data.welcome_message }]);
           } catch(err) {
@@ -99,6 +103,9 @@
       useEffect(function() {
         if (open && messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }, [messages, open]);
+
+      // Reset avatar error when agent changes
+      useEffect(function() { setAvatarError(false); }, [agent]);
 
       var handleSend = async function() {
         if (!input.trim() || !agent) return;
@@ -128,39 +135,51 @@
 
       var primaryColor = (agent && agent.colors && agent.colors.primary) || '#0f172a';
       var agentName = (agent && agent.name) || 'Chat Support';
-      var avatarUrl = agent ? getAvatarUrl(apiUrl, agent.id, agent.avatar) : null;
+      var rawAvatar = agent && agent.avatar;
+      var avatarUrl = (!avatarError && rawAvatar) ? getAvatarUrl(apiUrl, agent.id, rawAvatar) : null;
       var label = agentLoading ? 'Loading...' : agentName;
 
-      // Avatar element helper
+      // Initials fallback
+      function initialsEl(size, fontSize) {
+        var initials = agentName.split(' ').map(function(w) { return w[0]; }).slice(0, 2).join('').toUpperCase();
+        return React.createElement('div', {
+          style: { width: size + 'px', height: size + 'px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: (fontSize || size * 0.35) + 'px', fontWeight: 700, color: '#fff', flexShrink: 0 }
+        }, initials);
+      }
+
+      // Avatar element — shows image or initials fallback
       function avatarEl(size) {
         if (avatarUrl) {
           return React.createElement('img', {
             src: avatarUrl,
             alt: agentName,
-            style: { width: size + 'px', height: size + 'px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.4)' }
+            onError: function() { setAvatarError(true); },
+            style: { width: size + 'px', height: size + 'px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid rgba(255,255,255,0.4)' }
           });
         }
-        // Fallback: initials circle
-        var initials = agentName.split(' ').map(function(w) { return w[0]; }).slice(0, 2).join('').toUpperCase();
-        return React.createElement('div', {
-          style: { width: size + 'px', height: size + 'px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: (size * 0.35) + 'px', fontWeight: 700, color: '#fff', border: '2px solid rgba(255,255,255,0.4)' }
-        }, initials);
+        return initialsEl(size);
       }
+
+      // Chat icon SVG
+      var chatIconSVG = '<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+      var closeIconSVG = '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
 
       // Chat window
       var chatWindow = React.createElement('div', {
         style: { position: 'fixed', bottom: '88px', right: '20px', width: '360px', maxWidth: 'calc(100vw - 2rem)', height: '500px', maxHeight: 'calc(100vh - 6rem)', display: open ? 'flex' : 'none', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', overflow: 'hidden', fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif', zIndex: 2147483000 }
       },
-        // Header with avatar + name
+        // Header
         React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: primaryColor, color: '#fff' } },
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
             !agentLoading ? avatarEl(36) : null,
             React.createElement('div', null,
               React.createElement('div', { style: { fontWeight: 600, fontSize: '15px', lineHeight: 1.2 } }, label),
-              React.createElement('div', { style: { fontSize: '11px', opacity: 0.8, marginTop: '1px' } }, 'Online')
+              React.createElement('div', { style: { fontSize: '11px', opacity: 0.8, marginTop: '2px' } }, 'Online')
             )
           ),
-          React.createElement('button', { onClick: function() { setOpen(false); }, style: { background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '4px' } }, '\u00D7')
+          React.createElement('button', { onClick: function() { setOpen(false); }, style: { background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', lineHeight: 1, padding: '4px', display: 'flex' } },
+            React.createElement('span', { dangerouslySetInnerHTML: { __html: closeIconSVG } })
+          )
         ),
         // Messages
         React.createElement('div', { style: { flex: 1, overflowY: 'auto', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: '#f8fafc' } },
@@ -168,37 +187,38 @@
           !agentLoading && messages.length === 0 ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '14px', textAlign: 'center', marginTop: '20px' } }, 'Start a conversation...') : null,
           !agentLoading && messages.map(function(msg, idx) {
             return React.createElement('div', { key: idx, style: { display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '6px' } },
-              msg.role === 'assistant' && avatarUrl ? React.createElement('img', { src: avatarUrl, alt: '', style: { width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 } }) : null,
+              msg.role === 'assistant' ? avatarEl(24) : null,
               React.createElement('div', { style: { maxWidth: '80%', padding: '10px 14px', borderRadius: '14px', backgroundColor: msg.role === 'user' ? primaryColor : '#e2e8f0', color: msg.role === 'user' ? '#fff' : '#1e293b', fontSize: '14px', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, msg.content)
             );
           }),
-          loading ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '13px' } }, 'Assistant is typing...') : null,
+          loading ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '13px', paddingLeft: '30px' } }, 'Typing...') : null,
           React.createElement('div', { ref: messagesEndRef })
         ),
         // Input
         React.createElement('div', { style: { display: 'flex', gap: '8px', padding: '12px', borderTop: '1px solid #e2e8f0', backgroundColor: '#fff' } },
           React.createElement('input', { type: 'text', value: input, onChange: function(e) { setInput(e.target.value); }, onKeyDown: handleKeyDown, placeholder: 'Type your message...', disabled: loading || agentLoading || !agent, style: { flex: 1, padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '9999px', fontSize: '14px', outline: 'none' } }),
-          React.createElement('button', { onClick: handleSend, disabled: loading || agentLoading || !agent || !input.trim(), style: { border: 'none', borderRadius: '9999px', width: '40px', height: '40px', backgroundColor: primaryColor, color: '#fff', cursor: (!input.trim() || loading) ? 'not-allowed' : 'pointer', opacity: (!input.trim() || loading) ? 0.6 : 1, fontSize: '14px' } }, '\u27A4')
+          React.createElement('button', { onClick: handleSend, disabled: loading || agentLoading || !agent || !input.trim(), style: { border: 'none', borderRadius: '9999px', width: '40px', height: '40px', backgroundColor: primaryColor, color: '#fff', cursor: (!input.trim() || loading) ? 'not-allowed' : 'pointer', opacity: (!input.trim() || loading) ? 0.6 : 1, fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }, '\u27A4')
         )
       );
 
-      // Floating button with avatar
+      // Floating button — shows ONLY icon (chat or close), NO text
       var fab = React.createElement('button', {
         onClick: function() { setOpen(!open); },
+        title: agentName,
         style: { position: 'fixed', bottom: '20px', right: '20px', width: '60px', height: '60px', borderRadius: '9999px', border: 'none', backgroundColor: primaryColor, color: '#fff', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2147483000, padding: 0, overflow: 'hidden' },
-        'aria-label': 'Toggle chat'
+        'aria-label': agentName
       },
         open
-          ? React.createElement('span', { dangerouslySetInnerHTML: { __html: '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>' } })
-          : (avatarUrl && !agentLoading)
-            ? React.createElement('img', { src: avatarUrl, alt: agentName, style: { width: '60px', height: '60px', objectFit: 'cover', borderRadius: '9999px' } })
-            : React.createElement('span', { dangerouslySetInnerHTML: { __html: '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>' } })
+          ? React.createElement('span', { dangerouslySetInnerHTML: { __html: closeIconSVG } })
+          : avatarUrl && !agentLoading
+            ? React.createElement('img', { src: avatarUrl, alt: agentName, onError: function() { setAvatarError(true); }, style: { width: '60px', height: '60px', objectFit: 'cover', borderRadius: '9999px' } })
+            : React.createElement('span', { dangerouslySetInnerHTML: { __html: chatIconSVG } })
       );
 
-      // Tooltip with agent name below FAB
-      var tooltip = !open ? React.createElement('div', {
-        style: { position: 'fixed', bottom: '84px', right: '20px', backgroundColor: '#1e293b', color: '#fff', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap', zIndex: 2147483000, fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }
-      }, agentLoading ? '' : agentName) : null;
+      // Tooltip — agent name shown ABOVE the button, not inside it
+      var tooltip = !open && !agentLoading ? React.createElement('div', {
+        style: { position: 'fixed', bottom: '88px', right: '20px', backgroundColor: '#1e293b', color: '#fff', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap', zIndex: 2147483000, fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,0.2)', pointerEvents: 'none' }
+      }, agentName) : null;
 
       return React.createElement(React.Fragment, null, chatWindow, fab, tooltip);
     };
