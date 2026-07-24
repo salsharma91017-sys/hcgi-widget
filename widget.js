@@ -166,3 +166,7 @@
     if (!React) throw new Error('React not available');
     if (!ReactDOM) throw new Error('ReactDOM not available');
     const ChatWidget = createChatWidgetComponent(React, agentId, apiUrl);
+    ReactDOM.createRoot(container).render(React.createElement(ChatWidget));
+  }
+
+})();
