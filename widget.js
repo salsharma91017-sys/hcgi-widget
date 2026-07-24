@@ -13,12 +13,8 @@
         agentId = configOrAgentId;
         apiUrl = maybeApiUrl;
       }
-      if (!agentId) {
-        return Promise.reject(new Error('agentId is required'));
-      }
-      if (!apiUrl) {
-        apiUrl = SCRIPT_ORIGIN;
-      }
+      if (!agentId) return Promise.reject(new Error('agentId is required'));
+      if (!apiUrl) apiUrl = SCRIPT_ORIGIN;
       return initializeWidget(agentId, apiUrl).catch(function(error) {
         console.error('[WIDGET] init() failed:', error.message);
         throw error;
@@ -26,20 +22,25 @@
     }
   };
 
+  function getAvatarUrl(apiUrl, agentId, avatar) {
+    if (!avatar) return null;
+    return apiUrl + '/api/files/agents/' + agentId + '/' + avatar;
+  }
+
   function loadScript(src, globalName) {
-    return new Promise((resolve, reject) => {
+    return new Promise(function(resolve, reject) {
       if (globalName && window[globalName]) { resolve(); return; }
-      const s = document.createElement('script');
+      var s = document.createElement('script');
       s.src = src;
       s.crossOrigin = 'anonymous';
       s.addEventListener('load', resolve);
-      s.addEventListener('error', () => reject(new Error('Failed to load: ' + src)));
+      s.addEventListener('error', function() { reject(new Error('Failed to load: ' + src)); });
       document.head.appendChild(s);
     });
   }
 
   function createContainer() {
-    let c = document.getElementById('hcgi-chat-widget-container');
+    var c = document.getElementById('hcgi-chat-widget-container');
     if (c) return c;
     c = document.createElement('div');
     c.id = 'hcgi-chat-widget-container';
@@ -50,34 +51,39 @@
 
   function createChatWidgetComponent(React, agentId, apiUrl) {
     return function ChatWidget() {
-      const [open, setOpen] = React.useState(false);
-      const [agent, setAgent] = React.useState(null);
-      const [agentLoading, setAgentLoading] = React.useState(true);
-      const [messages, setMessages] = React.useState([]);
-      const [input, setInput] = React.useState('');
-      const [loading, setLoading] = React.useState(false);
-      const [conversationId, setConversationId] = React.useState(null);
-      const [visitorId] = React.useState(function() {
-        let id = null;
-        try { id = localStorage.getItem('hcgi_visitor_id'); } catch(e){}
+      var useState = React.useState;
+      var useEffect = React.useEffect;
+      var useRef = React.useRef;
+
+      var openState = useState(false); var open = openState[0]; var setOpen = openState[1];
+      var agentState = useState(null); var agent = agentState[0]; var setAgent = agentState[1];
+      var agentLoadingState = useState(true); var agentLoading = agentLoadingState[0]; var setAgentLoading = agentLoadingState[1];
+      var messagesState = useState([]); var messages = messagesState[0]; var setMessages = messagesState[1];
+      var inputState = useState(''); var input = inputState[0]; var setInput = inputState[1];
+      var loadingState = useState(false); var loading = loadingState[0]; var setLoading = loadingState[1];
+      var convState = useState(null); var conversationId = convState[0]; var setConversationId = convState[1];
+      var visitorIdState = useState(function() {
+        var id = null;
+        try { id = localStorage.getItem('hcgi_visitor_id'); } catch(e) {}
         if (!id) {
-          id = 'visitor_' + Date.now() + '_' + Math.random().toString(36).substr(2,9);
-          try { localStorage.setItem('hcgi_visitor_id', id); } catch(e){}
+          id = 'visitor_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+          try { localStorage.setItem('hcgi_visitor_id', id); } catch(e) {}
         }
         return id;
       });
-      const messagesEndRef = React.useRef(null);
+      var visitorId = visitorIdState[0];
+      var messagesEndRef = useRef(null);
 
-      React.useEffect(function() {
-        let cancelled = false;
+      useEffect(function() {
+        var cancelled = false;
         (async function() {
           try {
-            const r = await fetch(apiUrl + '/hcgi/api/agents', {
+            var r = await fetch(apiUrl + '/hcgi/api/agents', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ id: agentId }),
             });
-            const data = await r.json();
+            var data = await r.json();
             if (cancelled) return;
             setAgent(data);
             if (data.welcome_message) setMessages([{ role: 'assistant', content: data.welcome_message }]);
@@ -90,23 +96,23 @@
         return function() { cancelled = true; };
       }, []);
 
-      React.useEffect(function() {
+      useEffect(function() {
         if (open && messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }, [messages, open]);
 
-      const handleSend = async function() {
+      var handleSend = async function() {
         if (!input.trim() || !agent) return;
-        const sentInput = input;
+        var sentInput = input;
         setMessages(function(prev) { return prev.concat([{ role: 'user', content: sentInput }]); });
         setInput('');
         setLoading(true);
         try {
-          const r = await fetch(apiUrl + '/hcgi/api/chat', {
+          var r = await fetch(apiUrl + '/hcgi/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agent_id: agent.id, conversation_id: conversationId, message_content: sentInput, visitor_id: visitorId }),
           });
-          const data = await r.json();
+          var data = await r.json();
           setMessages(function(prev) { return prev.concat([{ role: 'assistant', content: data.content }]); });
           if (!conversationId) setConversationId(data.conversation_id);
         } catch(err) {
@@ -116,56 +122,99 @@
         }
       };
 
-      const handleKeyDown = function(e) {
+      var handleKeyDown = function(e) {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
       };
 
-      const primaryColor = (agent && agent.colors && agent.colors.primary) || '#0f172a';
-      const label = agentLoading ? 'Loading...' : ((agent && agent.name) || 'Chat Support');
+      var primaryColor = (agent && agent.colors && agent.colors.primary) || '#0f172a';
+      var agentName = (agent && agent.name) || 'Chat Support';
+      var avatarUrl = agent ? getAvatarUrl(apiUrl, agent.id, agent.avatar) : null;
+      var label = agentLoading ? 'Loading...' : agentName;
 
-      return React.createElement(React.Fragment, null,
-        React.createElement('div', { style: { position:'fixed', bottom:'88px', right:'20px', width:'360px', maxWidth:'calc(100vw - 2rem)', height:'500px', maxHeight:'calc(100vh - 6rem)', display: open ? 'flex' : 'none', flexDirection:'column', backgroundColor:'#fff', borderRadius:'12px', boxShadow:'0 20px 25px -5px rgba(0,0,0,0.2)', overflow:'hidden', fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif', zIndex:2147483000 } },
-          React.createElement('div', { style: { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 16px', backgroundColor: primaryColor, color:'#fff' } },
-            React.createElement('span', { style: { fontWeight:600, fontSize:'15px' } }, label),
-            React.createElement('button', { onClick: function() { setOpen(false); }, style: { background:'transparent', border:'none', color:'#fff', cursor:'pointer', fontSize:'18px' } }, '\u00D7')
+      // Avatar element helper
+      function avatarEl(size) {
+        if (avatarUrl) {
+          return React.createElement('img', {
+            src: avatarUrl,
+            alt: agentName,
+            style: { width: size + 'px', height: size + 'px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.4)' }
+          });
+        }
+        // Fallback: initials circle
+        var initials = agentName.split(' ').map(function(w) { return w[0]; }).slice(0, 2).join('').toUpperCase();
+        return React.createElement('div', {
+          style: { width: size + 'px', height: size + 'px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: (size * 0.35) + 'px', fontWeight: 700, color: '#fff', border: '2px solid rgba(255,255,255,0.4)' }
+        }, initials);
+      }
+
+      // Chat window
+      var chatWindow = React.createElement('div', {
+        style: { position: 'fixed', bottom: '88px', right: '20px', width: '360px', maxWidth: 'calc(100vw - 2rem)', height: '500px', maxHeight: 'calc(100vh - 6rem)', display: open ? 'flex' : 'none', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', overflow: 'hidden', fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif', zIndex: 2147483000 }
+      },
+        // Header with avatar + name
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: primaryColor, color: '#fff' } },
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+            !agentLoading ? avatarEl(36) : null,
+            React.createElement('div', null,
+              React.createElement('div', { style: { fontWeight: 600, fontSize: '15px', lineHeight: 1.2 } }, label),
+              React.createElement('div', { style: { fontSize: '11px', opacity: 0.8, marginTop: '1px' } }, 'Online')
+            )
           ),
-          React.createElement('div', { style: { flex:1, overflowY:'auto', padding:'14px', display:'flex', flexDirection:'column', gap:'10px', backgroundColor:'#f8fafc' } },
-            agentLoading ? React.createElement('div', { style: { color:'#94a3b8', fontSize:'14px', textAlign:'center', marginTop:'20px' } }, 'Loading...') : null,
-            !agentLoading && messages.length === 0 ? React.createElement('div', { style: { color:'#94a3b8', fontSize:'14px', textAlign:'center', marginTop:'20px' } }, 'Start a conversation...') : null,
-            !agentLoading && messages.map(function(msg, idx) {
-              return React.createElement('div', { key: idx, style: { display:'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' } },
-                React.createElement('div', { style: { maxWidth:'80%', padding:'10px 14px', borderRadius:'14px', backgroundColor: msg.role === 'user' ? primaryColor : '#e2e8f0', color: msg.role === 'user' ? '#fff' : '#1e293b', fontSize:'14px', lineHeight:1.45, whiteSpace:'pre-wrap', wordBreak:'break-word' } }, msg.content)
-              );
-            }),
-            loading ? React.createElement('div', { style: { color:'#94a3b8', fontSize:'13px' } }, 'Assistant is typing...') : null,
-            React.createElement('div', { ref: messagesEndRef })
-          ),
-          React.createElement('div', { style: { display:'flex', gap:'8px', padding:'12px', borderTop:'1px solid #e2e8f0', backgroundColor:'#fff' } },
-            React.createElement('input', { type:'text', value:input, onChange: function(e) { setInput(e.target.value); }, onKeyDown: handleKeyDown, placeholder:'Type your message...', disabled: loading || agentLoading || !agent, style: { flex:1, padding:'10px 12px', border:'1px solid #e2e8f0', borderRadius:'9999px', fontSize:'14px', outline:'none' } }),
-            React.createElement('button', { onClick: handleSend, disabled: loading || agentLoading || !agent || !input.trim(), style: { border:'none', borderRadius:'9999px', width:'40px', height:'40px', backgroundColor: primaryColor, color:'#fff', cursor: (!input.trim() || loading) ? 'not-allowed' : 'pointer', opacity: (!input.trim() || loading) ? 0.6 : 1, fontSize:'14px' } }, '\u27A4')
-          )
+          React.createElement('button', { onClick: function() { setOpen(false); }, style: { background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '20px', lineHeight: 1, padding: '4px' } }, '\u00D7')
         ),
-        React.createElement('button', { onClick: function() { setOpen(!open); }, style: { position:'fixed', bottom:'20px', right:'20px', width:'56px', height:'56px', borderRadius:'9999px', border:'none', backgroundColor: primaryColor, color:'#fff', boxShadow:'0 10px 15px -3px rgba(0,0,0,0.2)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', zIndex:2147483000 } },
-          React.createElement('span', { dangerouslySetInnerHTML: { __html: open
-            ? '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>'
-            : '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>'
-          } })
+        // Messages
+        React.createElement('div', { style: { flex: 1, overflowY: 'auto', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: '#f8fafc' } },
+          agentLoading ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '14px', textAlign: 'center', marginTop: '20px' } }, 'Loading...') : null,
+          !agentLoading && messages.length === 0 ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '14px', textAlign: 'center', marginTop: '20px' } }, 'Start a conversation...') : null,
+          !agentLoading && messages.map(function(msg, idx) {
+            return React.createElement('div', { key: idx, style: { display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '6px' } },
+              msg.role === 'assistant' && avatarUrl ? React.createElement('img', { src: avatarUrl, alt: '', style: { width: '24px', height: '24px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0 } }) : null,
+              React.createElement('div', { style: { maxWidth: '80%', padding: '10px 14px', borderRadius: '14px', backgroundColor: msg.role === 'user' ? primaryColor : '#e2e8f0', color: msg.role === 'user' ? '#fff' : '#1e293b', fontSize: '14px', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, msg.content)
+            );
+          }),
+          loading ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '13px' } }, 'Assistant is typing...') : null,
+          React.createElement('div', { ref: messagesEndRef })
+        ),
+        // Input
+        React.createElement('div', { style: { display: 'flex', gap: '8px', padding: '12px', borderTop: '1px solid #e2e8f0', backgroundColor: '#fff' } },
+          React.createElement('input', { type: 'text', value: input, onChange: function(e) { setInput(e.target.value); }, onKeyDown: handleKeyDown, placeholder: 'Type your message...', disabled: loading || agentLoading || !agent, style: { flex: 1, padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '9999px', fontSize: '14px', outline: 'none' } }),
+          React.createElement('button', { onClick: handleSend, disabled: loading || agentLoading || !agent || !input.trim(), style: { border: 'none', borderRadius: '9999px', width: '40px', height: '40px', backgroundColor: primaryColor, color: '#fff', cursor: (!input.trim() || loading) ? 'not-allowed' : 'pointer', opacity: (!input.trim() || loading) ? 0.6 : 1, fontSize: '14px' } }, '\u27A4')
         )
       );
+
+      // Floating button with avatar
+      var fab = React.createElement('button', {
+        onClick: function() { setOpen(!open); },
+        style: { position: 'fixed', bottom: '20px', right: '20px', width: '60px', height: '60px', borderRadius: '9999px', border: 'none', backgroundColor: primaryColor, color: '#fff', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2147483000, padding: 0, overflow: 'hidden' },
+        'aria-label': 'Toggle chat'
+      },
+        open
+          ? React.createElement('span', { dangerouslySetInnerHTML: { __html: '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>' } })
+          : (avatarUrl && !agentLoading)
+            ? React.createElement('img', { src: avatarUrl, alt: agentName, style: { width: '60px', height: '60px', objectFit: 'cover', borderRadius: '9999px' } })
+            : React.createElement('span', { dangerouslySetInnerHTML: { __html: '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>' } })
+      );
+
+      // Tooltip with agent name below FAB
+      var tooltip = !open ? React.createElement('div', {
+        style: { position: 'fixed', bottom: '84px', right: '20px', backgroundColor: '#1e293b', color: '#fff', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap', zIndex: 2147483000, fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }
+      }, agentLoading ? '' : agentName) : null;
+
+      return React.createElement(React.Fragment, null, chatWindow, fab, tooltip);
     };
   }
 
   async function initializeWidget(agentId, apiUrl) {
-    const container = createContainer();
+    var container = createContainer();
     await Promise.all([
       loadScript('https://unpkg.com/react@18/umd/react.production.min.js', 'React'),
       loadScript('https://unpkg.com/react-dom@18/umd/react-dom.production.min.js', 'ReactDOM'),
     ]);
-    const React = window.React;
-    const ReactDOM = window.ReactDOM;
+    var React = window.React;
+    var ReactDOM = window.ReactDOM;
     if (!React) throw new Error('React not available');
     if (!ReactDOM) throw new Error('ReactDOM not available');
-    const ChatWidget = createChatWidgetComponent(React, agentId, apiUrl);
+    var ChatWidget = createChatWidgetComponent(React, agentId, apiUrl);
     ReactDOM.createRoot(container).render(React.createElement(ChatWidget));
   }
 
