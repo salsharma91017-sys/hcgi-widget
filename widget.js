@@ -25,7 +25,7 @@
   function getAvatarUrl(apiUrl, agentId, avatar) {
     if (!avatar) return null;
     // PocketBase file URL format
-    return apiUrl + '/api/files/agents/' + agentId + '/' + avatar;
+    return apiUrl + '/hcgi/platform/api/files/agents/' + agentId + '/' + avatar;
   }
 
   function loadScript(src, globalName) {
