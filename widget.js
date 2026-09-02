@@ -27,55 +27,52 @@
     return apiUrl + '/hcgi/platform/api/files/agents/' + agentId + '/' + avatar;
   }
 
-  function parseMessageContent(text, primaryColor) {
-    var urlRegex = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/gi;
-    var phoneRegex = /(\+?[\d][\d\s\-().]{6,}[\d])/g;
-    var matches = [];
-    var m;
+  // Convert markdown to safe HTML
+  function markdownToHtml(text) {
+    // Escape HTML first to prevent XSS
+    var escaped = text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
 
-    urlRegex.lastIndex = 0;
-    while ((m = urlRegex.exec(text)) !== null) {
-      matches.push({ index: m.index, end: m.index + m[0].length, text: m[0], type: 'url' });
-    }
-
-    phoneRegex.lastIndex = 0;
-    while ((m = phoneRegex.exec(text)) !== null) {
-      var digits = m[0].replace(/\D/g, '');
-      if (digits.length >= 7 && digits.length <= 15) {
-        var overlaps = matches.some(function(u) { return m.index >= u.index && m.index < u.end; });
-        if (!overlaps) {
-          matches.push({ index: m.index, end: m.index + m[0].length, text: m[0], type: 'phone' });
+    return escaped
+      // Headings ## and ###
+      .replace(/^### (.+)$/gm, '<strong>$1</strong>')
+      .replace(/^## (.+)$/gm, '<strong>$1</strong>')
+      .replace(/^# (.+)$/gm, '<strong>$1</strong>')
+      // Bold **text**
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      // Italic *text*
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      // Markdown links [text](url)
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:LINKCOLOR;text-decoration:underline;word-break:break-all;">$1</a>')
+      // Plain URLs
+      .replace(/(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:LINKCOLOR;text-decoration:underline;word-break:break-all;">$1</a>')
+      // Phone numbers tel:
+      .replace(/(\+?[\d][\d\s\-().]{6,}[\d])/g, function(match) {
+        var digits = match.replace(/\D/g, '');
+        if (digits.length >= 7 && digits.length <= 15) {
+          return '<a href="tel:' + digits + '" style="color:LINKCOLOR;text-decoration:underline;font-weight:600;">' + match + '</a>';
         }
-      }
-    }
+        return match;
+      })
+      // Horizontal rule ---
+      .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #e2e8f0;margin:8px 0;">')
+      // Bullet lists - item
+      .replace(/^[-*] (.+)$/gm, '• $1')
+      // Numbered lists
+      .replace(/^\d+\. (.+)$/gm, function(match, p1) { return '• ' + p1; })
+      // Line breaks
+      .replace(/\n/g, '<br>');
+  }
 
-    matches.sort(function(a, b) { return a.index - b.index; });
-
-    var elements = [];
-    var cursor = 0;
-
-    matches.forEach(function(match, i) {
-      if (match.index > cursor) elements.push(text.slice(cursor, match.index));
-      if (match.type === 'url') {
-        elements.push(React.createElement('a', {
-          key: 'link-' + i,
-          href: match.text,
-          target: '_blank',
-          rel: 'noopener noreferrer',
-          style: { color: primaryColor, textDecoration: 'underline', wordBreak: 'break-all' }
-        }, match.text));
-      } else if (match.type === 'phone') {
-        elements.push(React.createElement('a', {
-          key: 'phone-' + i,
-          href: 'tel:' + match.text.replace(/[\s\-().]/g, ''),
-          style: { color: primaryColor, textDecoration: 'underline', fontWeight: 600 }
-        }, match.text));
-      }
-      cursor = match.end;
+  function renderMessage(content, primaryColor, isUser) {
+    var linkColor = isUser ? '#fff' : primaryColor;
+    var html = markdownToHtml(content).replace(/LINKCOLOR/g, linkColor);
+    return React.createElement('div', {
+      dangerouslySetInnerHTML: { __html: html },
+      style: { maxWidth: '80%', padding: '10px 14px', borderRadius: '14px', backgroundColor: isUser ? primaryColor : '#e2e8f0', color: isUser ? '#fff' : '#1e293b', fontSize: '14px', lineHeight: 1.6, wordBreak: 'break-word' }
     });
-
-    if (cursor < text.length) elements.push(text.slice(cursor));
-    return elements.length > 0 ? elements : [text];
   }
 
   function loadScript(src, globalName) {
@@ -229,13 +226,9 @@
           !agentLoading && messages.length === 0 ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '14px', textAlign: 'center', marginTop: '20px' } }, 'Start a conversation...') : null,
           !agentLoading && messages.map(function(msg, idx) {
             var isUser = msg.role === 'user';
-            var linkColor = isUser ? '#fff' : primaryColor;
-            var contentElements = parseMessageContent(msg.content, linkColor);
             return React.createElement('div', { key: idx, style: { display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '6px' } },
               !isUser ? avatarEl(24) : null,
-              React.createElement('div', {
-                style: { maxWidth: '80%', padding: '10px 14px', borderRadius: '14px', backgroundColor: isUser ? primaryColor : '#e2e8f0', color: isUser ? '#fff' : '#1e293b', fontSize: '14px', lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }
-              }, contentElements)
+              renderMessage(msg.content, primaryColor, isUser)
             );
           }),
           loading ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '13px', paddingLeft: '30px' } }, 'Typing...') : null,
