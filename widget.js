@@ -28,50 +28,84 @@
   }
 
   // Convert markdown to safe HTML
-  function markdownToHtml(text) {
-    // Escape HTML first to prevent XSS
-    var escaped = text
+  // IMPORTANT: process markdown BEFORE escaping HTML so URLs are not broken
+  function markdownToHtml(text, linkColor) {
+    var result = text;
+
+    // Step 1: Extract and protect markdown links [text](url) before any escaping
+    var linkPlaceholders = [];
+    result = result.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, function(match, linkText, url) {
+      var idx = linkPlaceholders.length;
+      var safeText = linkText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      linkPlaceholders.push('<a href="' + url + '" target="_blank" rel="noopener noreferrer" style="color:' + linkColor + ';text-decoration:underline;word-break:break-all;">' + safeText + '</a>');
+      return '\x00LINK' + idx + '\x00';
+    });
+
+    // Step 2: Extract and protect plain URLs before escaping
+    result = result.replace(/(https?:\/\/[^\s<>"{}|\\^`[\]\x00]+)/g, function(url) {
+      var idx = linkPlaceholders.length;
+      linkPlaceholders.push('<a href="' + url + '" target="_blank" rel="noopener noreferrer" style="color:' + linkColor + ';text-decoration:underline;word-break:break-all;">' + url + '</a>');
+      return '\x00LINK' + idx + '\x00';
+    });
+
+    // Step 3: Now escape remaining HTML
+    result = result
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
-    return escaped
-      // Headings ## and ###
-      .replace(/^### (.+)$/gm, '<strong>$1</strong>')
-      .replace(/^## (.+)$/gm, '<strong>$1</strong>')
-      .replace(/^# (.+)$/gm, '<strong>$1</strong>')
-      // Bold **text**
+    // Step 4: Apply other markdown
+    result = result
+      // Headings
+      .replace(/^### (.+)$/gm, '<strong style="font-size:15px;">$1</strong>')
+      .replace(/^## (.+)$/gm, '<strong style="font-size:15px;">$1</strong>')
+      .replace(/^# (.+)$/gm, '<strong style="font-size:16px;">$1</strong>')
+      // Bold
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      // Italic *text*
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      // Markdown links [text](url)
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color:LINKCOLOR;text-decoration:underline;word-break:break-all;">$1</a>')
-      // Plain URLs
-      .replace(/(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:LINKCOLOR;text-decoration:underline;word-break:break-all;">$1</a>')
-      // Phone numbers tel:
+      // Italic (only single * not already part of **)
+      .replace(/\*([^*]+?)\*/g, '<em>$1</em>')
+      // Phone numbers
       .replace(/(\+?[\d][\d\s\-().]{6,}[\d])/g, function(match) {
         var digits = match.replace(/\D/g, '');
         if (digits.length >= 7 && digits.length <= 15) {
-          return '<a href="tel:' + digits + '" style="color:LINKCOLOR;text-decoration:underline;font-weight:600;">' + match + '</a>';
+          return '<a href="tel:' + digits + '" style="color:' + linkColor + ';text-decoration:underline;font-weight:600;">' + match + '</a>';
         }
         return match;
       })
-      // Horizontal rule ---
-      .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid #e2e8f0;margin:8px 0;">')
-      // Bullet lists - item
-      .replace(/^[-*] (.+)$/gm, '• $1')
+      // Horizontal rule
+      .replace(/^---$/gm, '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.3);margin:8px 0;">')
+      // Bullet lists
+      .replace(/^[\-\*] (.+)$/gm, '<span style="display:block;padding-left:12px;">• $1</span>')
       // Numbered lists
-      .replace(/^\d+\. (.+)$/gm, function(match, p1) { return '• ' + p1; })
+      .replace(/^\d+\. (.+)$/gm, function(match, p1, offset, str) {
+        return '<span style="display:block;padding-left:12px;">• ' + p1 + '</span>';
+      })
       // Line breaks
       .replace(/\n/g, '<br>');
+
+    // Step 5: Restore protected links
+    linkPlaceholders.forEach(function(link, idx) {
+      result = result.replace('\x00LINK' + idx + '\x00', link);
+    });
+
+    return result;
   }
 
   function renderMessage(content, primaryColor, isUser) {
     var linkColor = isUser ? '#fff' : primaryColor;
-    var html = markdownToHtml(content).replace(/LINKCOLOR/g, linkColor);
+    var html = markdownToHtml(content, linkColor);
     return React.createElement('div', {
       dangerouslySetInnerHTML: { __html: html },
-      style: { maxWidth: '80%', padding: '10px 14px', borderRadius: '14px', backgroundColor: isUser ? primaryColor : '#e2e8f0', color: isUser ? '#fff' : '#1e293b', fontSize: '14px', lineHeight: 1.6, wordBreak: 'break-word' }
+      style: {
+        maxWidth: '80%',
+        padding: '10px 14px',
+        borderRadius: '14px',
+        backgroundColor: isUser ? primaryColor : '#e2e8f0',
+        color: isUser ? '#fff' : '#1e293b',
+        fontSize: '14px',
+        lineHeight: 1.6,
+        wordBreak: 'break-word'
+      }
     });
   }
 
@@ -188,15 +222,19 @@
       function initialsEl(size) {
         var initials = agentName.split(' ').map(function(w) { return w[0]; }).slice(0, 2).join('').toUpperCase();
         return React.createElement('div', {
-          style: { width: size + 'px', height: size + 'px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: (size * 0.35) + 'px', fontWeight: 700, color: '#fff', flexShrink: 0 }
+          style: { width: size + 'px', height: size + 'px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(size * 0.35) + 'px', fontWeight: 700, color: '#fff', flexShrink: 0 }
         }, initials);
       }
 
       function avatarEl(size) {
         if (avatarUrl) {
           return React.createElement('img', {
-            src: avatarUrl, alt: agentName,
-            onError: function() { setAvatarError(true); },
+            src: avatarUrl,
+            alt: agentName,
+            onError: function() {
+              console.warn('[WIDGET] Avatar failed to load:', avatarUrl);
+              setAvatarError(true);
+            },
             style: { width: size + 'px', height: size + 'px', borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid rgba(255,255,255,0.4)' }
           });
         }
@@ -209,6 +247,7 @@
       var chatWindow = React.createElement('div', {
         style: { position: 'fixed', bottom: '88px', right: '20px', width: '360px', maxWidth: 'calc(100vw - 2rem)', height: '500px', maxHeight: 'calc(100vh - 6rem)', display: open ? 'flex' : 'none', flexDirection: 'column', backgroundColor: '#fff', borderRadius: '12px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)', overflow: 'hidden', fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif', zIndex: 2147483000 }
       },
+        // Header
         React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: primaryColor, color: '#fff' } },
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
             !agentLoading ? avatarEl(36) : null,
@@ -221,6 +260,7 @@
             React.createElement('span', { dangerouslySetInnerHTML: { __html: closeIconSVG } })
           )
         ),
+        // Messages
         React.createElement('div', { style: { flex: 1, overflowY: 'auto', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px', backgroundColor: '#f8fafc' } },
           agentLoading ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '14px', textAlign: 'center', marginTop: '20px' } }, 'Loading...') : null,
           !agentLoading && messages.length === 0 ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '14px', textAlign: 'center', marginTop: '20px' } }, 'Start a conversation...') : null,
@@ -234,12 +274,14 @@
           loading ? React.createElement('div', { style: { color: '#94a3b8', fontSize: '13px', paddingLeft: '30px' } }, 'Typing...') : null,
           React.createElement('div', { ref: messagesEndRef })
         ),
+        // Input
         React.createElement('div', { style: { display: 'flex', gap: '8px', padding: '12px', borderTop: '1px solid #e2e8f0', backgroundColor: '#fff' } },
           React.createElement('input', { type: 'text', value: input, onChange: function(e) { setInput(e.target.value); }, onKeyDown: handleKeyDown, placeholder: 'Type your message...', disabled: loading || agentLoading || !agent, style: { flex: 1, padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '9999px', fontSize: '14px', outline: 'none' } }),
           React.createElement('button', { onClick: handleSend, disabled: loading || agentLoading || !agent || !input.trim(), style: { border: 'none', borderRadius: '9999px', width: '40px', height: '40px', backgroundColor: primaryColor, color: '#fff', cursor: (!input.trim() || loading) ? 'not-allowed' : 'pointer', opacity: (!input.trim() || loading) ? 0.6 : 1, fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center' } }, '\u27A4')
         )
       );
 
+      // FAB
       var fab = React.createElement('button', {
         onClick: function() { setOpen(!open); },
         title: agentName,
@@ -253,6 +295,7 @@
             : React.createElement('span', { dangerouslySetInnerHTML: { __html: chatIconSVG } })
       );
 
+      // Tooltip
       var tooltip = !open && !agentLoading ? React.createElement('div', {
         style: { position: 'fixed', bottom: '88px', right: '20px', backgroundColor: '#1e293b', color: '#fff', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 500, whiteSpace: 'nowrap', zIndex: 2147483000, fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif', boxShadow: '0 2px 8px rgba(0,0,0,0.2)', pointerEvents: 'none' }
       }, agentName) : null;
